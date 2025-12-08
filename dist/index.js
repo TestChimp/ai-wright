@@ -241,6 +241,58 @@ function extendTestTimeout(context, reason) {
         }
     }
 }
+/**
+ * Restore timeouts to their baseline values after AI action completes
+ * Restores both test.setTimeout() and page.setDefaultTimeout() if they were extended
+ */
+function restoreTestTimeout(context, reason) {
+    // Try to restore test.setTimeout() first
+    const setterInfo = resolveTimeoutSetter(context);
+    if (setterInfo) {
+        try {
+            const state = testTimeoutStates.get(setterInfo.owner);
+            if (state) {
+                setterInfo.set(state.baselineTimeoutMs);
+                (0, ai_client_1.debugLog)('Restored test timeout to baseline', {
+                    reason,
+                    restoredTimeoutMs: state.baselineTimeoutMs,
+                });
+            }
+        }
+        catch (error) {
+            // Expected: "test.setTimeout() can only be called from a test"
+            // Fall through to page timeout restoration
+            (0, ai_client_1.debugLog)('test.setTimeout restoration failed, using page timeout restoration', {
+                error: error instanceof Error ? error.message : String(error),
+                reason
+            });
+        }
+    }
+    // Restore page timeout (works in runner-core VM context)
+    if (context.page?.setDefaultTimeout) {
+        try {
+            const state = pageTimeoutStates.get(context.page);
+            if (state) {
+                context.page.setDefaultTimeout(state.baselineTimeoutMs);
+                if (context.page.setDefaultNavigationTimeout) {
+                    // Try to restore navigation timeout to baseline as well
+                    // Note: We don't track navigation timeout separately, so restore to same baseline
+                    context.page.setDefaultNavigationTimeout(state.baselineTimeoutMs);
+                }
+                (0, ai_client_1.debugLog)('Restored page timeout to baseline', {
+                    reason,
+                    restoredTimeoutMs: state.baselineTimeoutMs,
+                });
+            }
+        }
+        catch (error) {
+            (0, ai_client_1.debugLog)('page.setDefaultTimeout restoration failed', {
+                error: error instanceof Error ? error.message : String(error),
+                reason
+            });
+        }
+    }
+}
 function resolveTimeoutSetter(context) {
     const candidates = [];
     if (context.test) {
@@ -675,137 +727,292 @@ async function act(objective, context) {
     }
     logDebug('ai.act invoked', { objective });
     extendTestTimeout(context, 'ai.act');
-    const expectFn = resolveExpect(context);
-    if (expectFn) {
-        logDebug('Registering Playwright expect for ai.act');
-        (0, som_handler_1.registerPlaywrightExpect)(expectFn);
-    }
-    const handler = new som_handler_1.PageSoMHandler(context.page, context.logger);
-    const waitRetryLimit = getMaxWaitRetries();
-    let waitCount = 0;
-    let preActionRetryCount = 0;
-    const aggregateResults = [];
-    while (true) {
-        const stabilization = await stabilizeForLlm({
-            context,
-            description: `ai.act objective: ${objective}`,
-            waitCount,
-            waitRetryLimit,
-            backoffMs: NAVIGATION_RETRY_DELAY_MS,
-            prepare: async () => {
-                await handler.updateSom(false);
-                const somMap = handler.getSomElementMap();
-                logDebug('SoM element map generated', { length: somMap.length });
-                const somScreenshot = await captureSomScreenshot(handler);
-                logDebug('Captured SoM screenshot', { bytes: somScreenshot.length });
-                return { somMap, somScreenshot };
-            },
-        });
-        waitCount = stabilization.waitCount;
-        const { somMap, somScreenshot } = stabilization.data;
-        // Log before LLM call
-        logDebug('Calling LLM for AI action', { objective, waitCount, waitRetryLimit });
-        const llmCallStart = Date.now();
-        const aiResult = await (0, ai_client_1.callAiAction)({
-            systemPrompt: buildActSystemPrompt(),
-            userPrompt: buildActUserPrompt(objective, somMap, waitCount, waitRetryLimit),
-            image: somScreenshot,
-        });
-        // Log after LLM call
-        const llmCallDuration = Date.now() - llmCallStart;
-        logDebug('LLM call completed', { durationMs: llmCallDuration, objective });
-        logDebug('AI action result received', { aiResult });
-        if (aiResult.shouldWait) {
-            logDebug('LLM requested additional stabilization wait', {
+    try {
+        const expectFn = resolveExpect(context);
+        if (expectFn) {
+            logDebug('Registering Playwright expect for ai.act');
+            (0, som_handler_1.registerPlaywrightExpect)(expectFn);
+        }
+        const handler = new som_handler_1.PageSoMHandler(context.page, context.logger);
+        const waitRetryLimit = getMaxWaitRetries();
+        let waitCount = 0;
+        let preActionRetryCount = 0;
+        const aggregateResults = [];
+        while (true) {
+            const stabilization = await stabilizeForLlm({
+                context,
+                description: `ai.act objective: ${objective}`,
                 waitCount,
                 waitRetryLimit,
-                waitReason: aiResult.waitReason,
-                commands: aiResult.commandsToRun?.length,
-                preCommands: aiResult.preCommands?.length,
+                backoffMs: NAVIGATION_RETRY_DELAY_MS,
+                prepare: async () => {
+                    await handler.updateSom(false);
+                    const somMap = handler.getSomElementMap();
+                    logDebug('SoM element map generated', { length: somMap.length });
+                    const somScreenshot = await captureSomScreenshot(handler);
+                    logDebug('Captured SoM screenshot', { bytes: somScreenshot.length });
+                    return { somMap, somScreenshot };
+                },
             });
-            if (aiResult.preCommands && aiResult.preCommands.length > 0) {
-                logDebug('Ignoring preCommands because shouldWait=true', { preCommands: aiResult.preCommands });
-            }
-            if (aiResult.commandsToRun && aiResult.commandsToRun.length > 0) {
-                logDebug('Ignoring commands because shouldWait=true', { commands: aiResult.commandsToRun });
-            }
-            if (waitCount >= waitRetryLimit) {
-                throw new Error(`LLM requested wait beyond max attempts (${waitRetryLimit}).`);
-            }
-            waitCount += 1;
-            continue;
-        }
-        if (aiResult.stepCompleted) {
-            logDebug('LLM indicated step already satisfied', { objective });
-            const response = {
-                command_results: aggregateResults,
-                status: types_1.CommandRunStatus.SUCCESS,
-                error: undefined,
-            };
-            logDebug('ai.act completed', response);
-            return response;
-        }
-        if (aiResult.requestSomRefresh) {
-            if (aiResult.commandsToRun && aiResult.commandsToRun.length > 0) {
-                logDebug('LLM requested SoM refresh but also supplied commands; commands will be ignored', {
-                    commands: aiResult.commandsToRun,
+            waitCount = stabilization.waitCount;
+            const { somMap, somScreenshot } = stabilization.data;
+            // Log before LLM call
+            logDebug('Calling LLM for AI action', { objective, waitCount, waitRetryLimit });
+            const llmCallStart = Date.now();
+            const aiResult = await (0, ai_client_1.callAiAction)({
+                systemPrompt: buildActSystemPrompt(),
+                userPrompt: buildActUserPrompt(objective, somMap, waitCount, waitRetryLimit),
+                image: somScreenshot,
+            });
+            // Log after LLM call
+            const llmCallDuration = Date.now() - llmCallStart;
+            logDebug('LLM call completed', { durationMs: llmCallDuration, objective });
+            logDebug('AI action result received', { aiResult });
+            if (aiResult.shouldWait) {
+                logDebug('LLM requested additional stabilization wait', {
+                    waitCount,
+                    waitRetryLimit,
+                    waitReason: aiResult.waitReason,
+                    commands: aiResult.commandsToRun?.length,
+                    preCommands: aiResult.preCommands?.length,
                 });
+                if (aiResult.preCommands && aiResult.preCommands.length > 0) {
+                    logDebug('Ignoring preCommands because shouldWait=true', { preCommands: aiResult.preCommands });
+                }
+                if (aiResult.commandsToRun && aiResult.commandsToRun.length > 0) {
+                    logDebug('Ignoring commands because shouldWait=true', { commands: aiResult.commandsToRun });
+                }
+                if (waitCount >= waitRetryLimit) {
+                    throw new Error(`LLM requested wait beyond max attempts (${waitRetryLimit}).`);
+                }
+                waitCount += 1;
+                continue;
             }
-            logDebug('LLM requested SoM refresh before executing commands', {
-                reason: aiResult.somRefreshReason,
-                waitCount,
-                waitRetryLimit,
-            });
-            try {
+            if (aiResult.stepCompleted) {
+                logDebug('LLM indicated step already satisfied', { objective });
+                const response = {
+                    command_results: aggregateResults,
+                    status: types_1.CommandRunStatus.SUCCESS,
+                    error: undefined,
+                };
+                logDebug('ai.act completed', response);
+                return response;
+            }
+            if (aiResult.requestSomRefresh) {
+                if (aiResult.commandsToRun && aiResult.commandsToRun.length > 0) {
+                    logDebug('LLM requested SoM refresh but also supplied commands; commands will be ignored', {
+                        commands: aiResult.commandsToRun,
+                    });
+                }
+                logDebug('LLM requested SoM refresh before executing commands', {
+                    reason: aiResult.somRefreshReason,
+                    waitCount,
+                    waitRetryLimit,
+                });
+                try {
+                    await (0, page_stability_1.waitForPageStability)(context.page, {
+                        logger: context.logger,
+                        description: `SoM refresh for ai.act objective: ${objective}`,
+                    });
+                    const count = await handler.updateSom(false);
+                    logDebug('SoM refreshed per LLM request', { elementCount: count });
+                }
+                catch (error) {
+                    if (isNavigationError(error)) {
+                        logDebug('Navigation interrupted SoM refresh requested by LLM; retrying', {
+                            reason: error instanceof Error ? error.message : String(error),
+                        });
+                        waitCount = Math.min(waitCount + 1, waitRetryLimit);
+                        preActionRetryCount = 0;
+                        continue;
+                    }
+                    throw error;
+                }
+                waitCount = Math.min(waitCount + 1, waitRetryLimit);
+                preActionRetryCount = 0;
+                continue;
+            }
+            const preCommands = aiResult.preCommands ?? [];
+            if (preCommands.length > 0) {
+                logDebug('Executing pre-commands', { count: preCommands.length });
+                for (const command of preCommands) {
+                    if (command.action === types_1.InteractionAction.WAIT_FOR) {
+                        const durationMs = clampWaitDuration(command.durationSeconds ?? (command.value ? Number(command.value) : undefined));
+                        logDebug('Executing WAIT_FOR pre-command as timed wait', {
+                            durationMs,
+                            command,
+                        });
+                        await context.page.waitForTimeout(durationMs);
+                        aggregateResults.push({
+                            failedAttempts: [],
+                            successAttempt: {
+                                command: `await page.waitForTimeout(${durationMs})`,
+                                status: types_1.CommandRunStatus.SUCCESS,
+                            },
+                            status: types_1.CommandRunStatus.SUCCESS,
+                        });
+                        continue;
+                    }
+                    logCommandSomContext('preCommand', command, handler);
+                    const timeout = isNavigationAction(command.action)
+                        ? (0, ai_client_1.getNavigationTimeout)()
+                        : (0, ai_client_1.getCommandTimeout)();
+                    const result = await executeSomCommand(handler, command, timeout);
+                    logDebug('Executed pre-command', {
+                        command,
+                        status: result.status,
+                        successAttempt: result.successAttempt,
+                        failedAttempts: (result.failedAttempts || []).map((attempt) => ({
+                            command: attempt.command,
+                            status: attempt.status,
+                            error: attempt.error,
+                        })),
+                        error: result.error,
+                    });
+                    aggregateResults.push(result);
+                    if (result.status === types_1.CommandRunStatus.FAILURE) {
+                        const failureMessage = [
+                            `AI action failed during pre-commands for objective: ${objective}`,
+                            result.error ? `Last error: ${result.error}` : undefined,
+                            formatFailedAttemptsLine(result.failedAttempts),
+                        ]
+                            .filter(Boolean)
+                            .join('\n');
+                        logDebug('ai.act failed during pre-commands', { command, result });
+                        throw new Error(failureMessage || 'Pre-action command failed.');
+                    }
+                }
+                logDebug('Pre-commands completed successfully', { count: preCommands.length });
+                logDebug('Waiting for page stability after pre-commands', { objective });
                 await (0, page_stability_1.waitForPageStability)(context.page, {
                     logger: context.logger,
-                    description: `SoM refresh for ai.act objective: ${objective}`,
+                    description: `post-preCommands for ai.act objective: ${objective}`,
                 });
-                const count = await handler.updateSom(false);
-                logDebug('SoM refreshed per LLM request', { elementCount: count });
-            }
-            catch (error) {
-                if (isNavigationError(error)) {
-                    logDebug('Navigation interrupted SoM refresh requested by LLM; retrying', {
-                        reason: error instanceof Error ? error.message : String(error),
-                    });
-                    waitCount = Math.min(waitCount + 1, waitRetryLimit);
-                    preActionRetryCount = 0;
-                    continue;
+                try {
+                    const count = await handler.updateSom(false);
+                    logDebug('SoM refreshed after pre-commands', { elementCount: count });
                 }
-                throw error;
-            }
-            waitCount = Math.min(waitCount + 1, waitRetryLimit);
-            preActionRetryCount = 0;
-            continue;
-        }
-        const preCommands = aiResult.preCommands ?? [];
-        if (preCommands.length > 0) {
-            logDebug('Executing pre-commands', { count: preCommands.length });
-            for (const command of preCommands) {
-                if (command.action === types_1.InteractionAction.WAIT_FOR) {
-                    const durationMs = clampWaitDuration(command.durationSeconds ?? (command.value ? Number(command.value) : undefined));
-                    logDebug('Executing WAIT_FOR pre-command as timed wait', {
-                        durationMs,
-                        command,
-                    });
-                    await context.page.waitForTimeout(durationMs);
-                    aggregateResults.push({
-                        failedAttempts: [],
-                        successAttempt: {
-                            command: `await page.waitForTimeout(${durationMs})`,
-                            status: types_1.CommandRunStatus.SUCCESS,
-                        },
-                        status: types_1.CommandRunStatus.SUCCESS,
-                    });
-                    continue;
+                catch (error) {
+                    if (isNavigationError(error)) {
+                        logDebug('Navigation interrupted SoM refresh after pre-commands; retrying', {
+                            reason: error instanceof Error ? error.message : String(error),
+                        });
+                        waitCount = Math.min(waitCount + 1, waitRetryLimit);
+                        preActionRetryCount = 0;
+                        continue;
+                    }
+                    throw error;
                 }
-                logCommandSomContext('preCommand', command, handler);
+            }
+            if (aiResult.needsRetryAfterPreActions) {
+                logDebug('LLM requested retry after pre-actions', {
+                    waitCount,
+                    waitRetryLimit,
+                    preActionRetryCount,
+                    commands: aiResult.commandsToRun?.length,
+                });
+                if (aiResult.commandsToRun && aiResult.commandsToRun.length > 0) {
+                    logDebug('Ignoring commands because needsRetryAfterPreActions=true', { commands: aiResult.commandsToRun });
+                }
+                if (preActionRetryCount >= waitRetryLimit) {
+                    throw new Error(`LLM requested retry after pre-actions beyond max attempts (${waitRetryLimit}).`);
+                }
+                preActionRetryCount += 1;
+                waitCount = 0;
+                continue;
+            }
+            let implicitWaitTriggered = false;
+            const commands = ensureCommands(aiResult, () => {
+                implicitWaitTriggered = true;
+            });
+            if (implicitWaitTriggered) {
+                if (waitCount >= waitRetryLimit) {
+                    throw new Error(`LLM returned empty commands without allowed flags beyond max wait attempts (${waitRetryLimit}).`);
+                }
+                logDebug('Implicit wait triggered due to empty command list; re-running stabilization', {
+                    waitCount,
+                    waitRetryLimit,
+                });
+                waitCount += 1;
+                await (0, page_stability_1.waitForPageStability)(context.page, {
+                    logger: context.logger,
+                    description: `implicit-wait for ai.act objective: ${objective}`,
+                });
+                continue;
+            }
+            let navigationRetryRequested = false;
+            const waitCommands = commands.filter((command) => command.action === types_1.InteractionAction.WAIT_FOR);
+            const actionCommands = commands.filter((command) => command.action !== types_1.InteractionAction.WAIT_FOR);
+            if (waitCommands.length > 0 && actionCommands.length > 0) {
+                logDebug('WAIT_FOR command mixed with other actions; will execute waits first', {
+                    waitCommands,
+                    actionCommands,
+                });
+            }
+            for (const waitCommand of waitCommands) {
+                const durationMs = clampWaitDuration(waitCommand.durationSeconds ?? (waitCommand.value ? Number(waitCommand.value) : undefined));
+                logDebug('Executing WAIT_FOR command', { durationMs, command: waitCommand });
+                await context.page.waitForTimeout(durationMs);
+                await (0, page_stability_1.waitForPageStability)(context.page, {
+                    logger: context.logger,
+                    description: `post-waitFor for ai.act objective: ${objective}`,
+                });
+                try {
+                    const count = await handler.updateSom(false);
+                    logDebug('SoM refreshed after WAIT_FOR command', { elementCount: count });
+                }
+                catch (error) {
+                    if (isNavigationError(error)) {
+                        logDebug('Navigation interrupted SoM refresh after WAIT_FOR; retrying', {
+                            reason: error instanceof Error ? error.message : String(error),
+                        });
+                        navigationRetryRequested = true;
+                        break;
+                    }
+                    throw error;
+                }
+            }
+            if (navigationRetryRequested) {
+                aggregateResults.length = 0;
+                waitCount = Math.min(waitCount + 1, waitRetryLimit);
+                preActionRetryCount = 0;
+                continue;
+            }
+            const commandsToExecute = actionCommands;
+            let status = types_1.CommandRunStatus.SUCCESS;
+            let lastError;
+            let failedCommand;
+            let reannotationRequested = false;
+            for (const command of commandsToExecute) {
+                logCommandSomContext('command', command, handler);
                 const timeout = isNavigationAction(command.action)
                     ? (0, ai_client_1.getNavigationTimeout)()
                     : (0, ai_client_1.getCommandTimeout)();
-                const result = await executeSomCommand(handler, command, timeout);
-                logDebug('Executed pre-command', {
+                let result;
+                try {
+                    result = await executeSomCommand(handler, command, timeout);
+                }
+                catch (error) {
+                    if (error instanceof som_handler_1.SomReannotationRequiredError) {
+                        logDebug('SoM target changed; refreshing map and re-prompting LLM', {
+                            command,
+                            reason: error.message,
+                            context: error.context,
+                        });
+                        reannotationRequested = true;
+                        break;
+                    }
+                    if (error instanceof NavigationInProgressError || isNavigationError(error)) {
+                        logDebug('Navigation interrupted command execution; refreshing map and retrying', {
+                            command,
+                            reason: error instanceof Error ? error.message : String(error),
+                        });
+                        navigationRetryRequested = true;
+                        break;
+                    }
+                    throw error;
+                }
+                logDebug('Executed command', {
                     command,
                     status: result.status,
                     successAttempt: result.successAttempt,
@@ -817,215 +1024,66 @@ async function act(objective, context) {
                     error: result.error,
                 });
                 aggregateResults.push(result);
+                try {
+                    logDebug('Post-command stabilization before refreshing SoM', {
+                        objective,
+                        command,
+                    });
+                    await (0, page_stability_1.waitForPageStability)(context.page, {
+                        logger: context.logger,
+                        description: `post-command for ai.act objective: ${objective}`,
+                    });
+                    const count = await handler.updateSom(false);
+                    logDebug('SoM refreshed after command', { elementCount: count });
+                }
+                catch (error) {
+                    if (isNavigationError(error)) {
+                        logDebug('Navigation interrupted post-command SoM refresh; retrying', {
+                            command,
+                            reason: error instanceof Error ? error.message : String(error),
+                        });
+                        navigationRetryRequested = true;
+                        break;
+                    }
+                    throw error;
+                }
                 if (result.status === types_1.CommandRunStatus.FAILURE) {
-                    const failureMessage = [
-                        `AI action failed during pre-commands for objective: ${objective}`,
-                        result.error ? `Last error: ${result.error}` : undefined,
-                        formatFailedAttemptsLine(result.failedAttempts),
-                    ]
-                        .filter(Boolean)
-                        .join('\n');
-                    logDebug('ai.act failed during pre-commands', { command, result });
-                    throw new Error(failureMessage || 'Pre-action command failed.');
-                }
-            }
-            logDebug('Pre-commands completed successfully', { count: preCommands.length });
-            logDebug('Waiting for page stability after pre-commands', { objective });
-            await (0, page_stability_1.waitForPageStability)(context.page, {
-                logger: context.logger,
-                description: `post-preCommands for ai.act objective: ${objective}`,
-            });
-            try {
-                const count = await handler.updateSom(false);
-                logDebug('SoM refreshed after pre-commands', { elementCount: count });
-            }
-            catch (error) {
-                if (isNavigationError(error)) {
-                    logDebug('Navigation interrupted SoM refresh after pre-commands; retrying', {
-                        reason: error instanceof Error ? error.message : String(error),
-                    });
-                    waitCount = Math.min(waitCount + 1, waitRetryLimit);
-                    preActionRetryCount = 0;
-                    continue;
-                }
-                throw error;
-            }
-        }
-        if (aiResult.needsRetryAfterPreActions) {
-            logDebug('LLM requested retry after pre-actions', {
-                waitCount,
-                waitRetryLimit,
-                preActionRetryCount,
-                commands: aiResult.commandsToRun?.length,
-            });
-            if (aiResult.commandsToRun && aiResult.commandsToRun.length > 0) {
-                logDebug('Ignoring commands because needsRetryAfterPreActions=true', { commands: aiResult.commandsToRun });
-            }
-            if (preActionRetryCount >= waitRetryLimit) {
-                throw new Error(`LLM requested retry after pre-actions beyond max attempts (${waitRetryLimit}).`);
-            }
-            preActionRetryCount += 1;
-            waitCount = 0;
-            continue;
-        }
-        let implicitWaitTriggered = false;
-        const commands = ensureCommands(aiResult, () => {
-            implicitWaitTriggered = true;
-        });
-        if (implicitWaitTriggered) {
-            if (waitCount >= waitRetryLimit) {
-                throw new Error(`LLM returned empty commands without allowed flags beyond max wait attempts (${waitRetryLimit}).`);
-            }
-            logDebug('Implicit wait triggered due to empty command list; re-running stabilization', {
-                waitCount,
-                waitRetryLimit,
-            });
-            waitCount += 1;
-            await (0, page_stability_1.waitForPageStability)(context.page, {
-                logger: context.logger,
-                description: `implicit-wait for ai.act objective: ${objective}`,
-            });
-            continue;
-        }
-        let navigationRetryRequested = false;
-        const waitCommands = commands.filter((command) => command.action === types_1.InteractionAction.WAIT_FOR);
-        const actionCommands = commands.filter((command) => command.action !== types_1.InteractionAction.WAIT_FOR);
-        if (waitCommands.length > 0 && actionCommands.length > 0) {
-            logDebug('WAIT_FOR command mixed with other actions; will execute waits first', {
-                waitCommands,
-                actionCommands,
-            });
-        }
-        for (const waitCommand of waitCommands) {
-            const durationMs = clampWaitDuration(waitCommand.durationSeconds ?? (waitCommand.value ? Number(waitCommand.value) : undefined));
-            logDebug('Executing WAIT_FOR command', { durationMs, command: waitCommand });
-            await context.page.waitForTimeout(durationMs);
-            await (0, page_stability_1.waitForPageStability)(context.page, {
-                logger: context.logger,
-                description: `post-waitFor for ai.act objective: ${objective}`,
-            });
-            try {
-                const count = await handler.updateSom(false);
-                logDebug('SoM refreshed after WAIT_FOR command', { elementCount: count });
-            }
-            catch (error) {
-                if (isNavigationError(error)) {
-                    logDebug('Navigation interrupted SoM refresh after WAIT_FOR; retrying', {
-                        reason: error instanceof Error ? error.message : String(error),
-                    });
-                    navigationRetryRequested = true;
+                    status = types_1.CommandRunStatus.FAILURE;
+                    lastError = result.error;
+                    failedCommand = command;
                     break;
                 }
-                throw error;
             }
+            if (reannotationRequested || navigationRetryRequested) {
+                aggregateResults.length = 0;
+                waitCount = Math.min(waitCount + 1, waitRetryLimit);
+                preActionRetryCount = 0;
+                continue;
+            }
+            const response = {
+                command_results: aggregateResults,
+                status,
+                error: lastError,
+            };
+            if (status === types_1.CommandRunStatus.FAILURE) {
+                const failedResult = aggregateResults[aggregateResults.length - 1];
+                logDebug('ai.act failed', { response, failedCommand });
+                const failureMessage = [
+                    `AI action failed for objective: ${objective}`,
+                    lastError ? `Last error: ${lastError}` : undefined,
+                    formatFailedAttemptsLine(failedResult?.failedAttempts),
+                ]
+                    .filter(Boolean)
+                    .join('\n');
+                throw new Error(failureMessage || 'AI action failed with unknown error.');
+            }
+            logDebug('ai.act completed', response);
+            return response;
         }
-        if (navigationRetryRequested) {
-            aggregateResults.length = 0;
-            waitCount = Math.min(waitCount + 1, waitRetryLimit);
-            preActionRetryCount = 0;
-            continue;
-        }
-        const commandsToExecute = actionCommands;
-        let status = types_1.CommandRunStatus.SUCCESS;
-        let lastError;
-        let failedCommand;
-        let reannotationRequested = false;
-        for (const command of commandsToExecute) {
-            logCommandSomContext('command', command, handler);
-            const timeout = isNavigationAction(command.action)
-                ? (0, ai_client_1.getNavigationTimeout)()
-                : (0, ai_client_1.getCommandTimeout)();
-            let result;
-            try {
-                result = await executeSomCommand(handler, command, timeout);
-            }
-            catch (error) {
-                if (error instanceof som_handler_1.SomReannotationRequiredError) {
-                    logDebug('SoM target changed; refreshing map and re-prompting LLM', {
-                        command,
-                        reason: error.message,
-                        context: error.context,
-                    });
-                    reannotationRequested = true;
-                    break;
-                }
-                if (error instanceof NavigationInProgressError || isNavigationError(error)) {
-                    logDebug('Navigation interrupted command execution; refreshing map and retrying', {
-                        command,
-                        reason: error instanceof Error ? error.message : String(error),
-                    });
-                    navigationRetryRequested = true;
-                    break;
-                }
-                throw error;
-            }
-            logDebug('Executed command', {
-                command,
-                status: result.status,
-                successAttempt: result.successAttempt,
-                failedAttempts: (result.failedAttempts || []).map((attempt) => ({
-                    command: attempt.command,
-                    status: attempt.status,
-                    error: attempt.error,
-                })),
-                error: result.error,
-            });
-            aggregateResults.push(result);
-            try {
-                logDebug('Post-command stabilization before refreshing SoM', {
-                    objective,
-                    command,
-                });
-                await (0, page_stability_1.waitForPageStability)(context.page, {
-                    logger: context.logger,
-                    description: `post-command for ai.act objective: ${objective}`,
-                });
-                const count = await handler.updateSom(false);
-                logDebug('SoM refreshed after command', { elementCount: count });
-            }
-            catch (error) {
-                if (isNavigationError(error)) {
-                    logDebug('Navigation interrupted post-command SoM refresh; retrying', {
-                        command,
-                        reason: error instanceof Error ? error.message : String(error),
-                    });
-                    navigationRetryRequested = true;
-                    break;
-                }
-                throw error;
-            }
-            if (result.status === types_1.CommandRunStatus.FAILURE) {
-                status = types_1.CommandRunStatus.FAILURE;
-                lastError = result.error;
-                failedCommand = command;
-                break;
-            }
-        }
-        if (reannotationRequested || navigationRetryRequested) {
-            aggregateResults.length = 0;
-            waitCount = Math.min(waitCount + 1, waitRetryLimit);
-            preActionRetryCount = 0;
-            continue;
-        }
-        const response = {
-            command_results: aggregateResults,
-            status,
-            error: lastError,
-        };
-        if (status === types_1.CommandRunStatus.FAILURE) {
-            const failedResult = aggregateResults[aggregateResults.length - 1];
-            logDebug('ai.act failed', { response, failedCommand });
-            const failureMessage = [
-                `AI action failed for objective: ${objective}`,
-                lastError ? `Last error: ${lastError}` : undefined,
-                formatFailedAttemptsLine(failedResult?.failedAttempts),
-            ]
-                .filter(Boolean)
-                .join('\n');
-            throw new Error(failureMessage || 'AI action failed with unknown error.');
-        }
-        logDebug('ai.act completed', response);
-        return response;
+    }
+    finally {
+        // Restore timeouts to baseline after ai.act completes
+        restoreTestTimeout(context, 'ai.act');
     }
 }
 async function verify(requirement, context, options) {
@@ -1034,76 +1092,82 @@ async function verify(requirement, context, options) {
     }
     logDebug('ai.verify invoked', { requirement });
     extendTestTimeout(context, 'ai.verify');
-    const waitRetryLimit = getMaxWaitRetries();
-    let waitCount = 0;
-    while (true) {
-        const stabilization = await stabilizeForLlm({
-            context,
-            description: `ai.verify requirement: ${requirement}`,
-            waitCount,
-            waitRetryLimit,
-            backoffMs: NAVIGATION_RETRY_DELAY_MS,
-            prepare: async () => capturePageScreenshot(context.page, true),
-        });
-        waitCount = stabilization.waitCount;
-        const screenshot = stabilization.data;
-        logDebug('Calling LLM for AI verification', { requirement });
-        const llmCallStart = Date.now();
-        let aiResult;
-        try {
-            aiResult = await (0, ai_client_1.callAiAction)({
-                systemPrompt: buildVerifySystemPrompt(),
-                userPrompt: buildVerifyUserPrompt(requirement),
-                image: screenshot,
-            });
-        }
-        catch (error) {
-            if (isNavigationError(error)) {
-                logDebug('Navigation interrupted verification LLM call; retrying after stabilization', {
-                    requirement,
-                });
-                waitCount = Math.min(waitCount + 1, waitRetryLimit);
-                if (waitCount > waitRetryLimit) {
-                    throw new Error(`Navigation continued interrupting verification for "${requirement}" beyond retry limit (${waitRetryLimit}).`);
-                }
-                continue;
-            }
-            throw error;
-        }
-        const llmCallDuration = Date.now() - llmCallStart;
-        logDebug('LLM call completed', { durationMs: llmCallDuration, requirement });
-        if (aiResult.requestSomRefresh) {
-            logDebug('LLM requested SoM refresh during verification; retrying', {
-                requirement,
-                reason: aiResult.somRefreshReason,
+    try {
+        const waitRetryLimit = getMaxWaitRetries();
+        let waitCount = 0;
+        while (true) {
+            const stabilization = await stabilizeForLlm({
+                context,
+                description: `ai.verify requirement: ${requirement}`,
                 waitCount,
                 waitRetryLimit,
+                backoffMs: NAVIGATION_RETRY_DELAY_MS,
+                prepare: async () => capturePageScreenshot(context.page, true),
             });
-            waitCount = Math.min(waitCount + 1, waitRetryLimit);
-            continue;
-        }
-        const { verificationSuccess, confidence, verificationReason } = extractVerification(aiResult);
-        logDebug('ai.verify result from LLM', { verificationSuccess, confidence, verificationReason });
-        if (aiResult.stepCompleted || verificationSuccess) {
-            logDebug('LLM indicated verification already satisfied', { requirement, verificationSuccess });
+            waitCount = stabilization.waitCount;
+            const screenshot = stabilization.data;
+            logDebug('Calling LLM for AI verification', { requirement });
+            const llmCallStart = Date.now();
+            let aiResult;
+            try {
+                aiResult = await (0, ai_client_1.callAiAction)({
+                    systemPrompt: buildVerifySystemPrompt(),
+                    userPrompt: buildVerifyUserPrompt(requirement),
+                    image: screenshot,
+                });
+            }
+            catch (error) {
+                if (isNavigationError(error)) {
+                    logDebug('Navigation interrupted verification LLM call; retrying after stabilization', {
+                        requirement,
+                    });
+                    waitCount = Math.min(waitCount + 1, waitRetryLimit);
+                    if (waitCount > waitRetryLimit) {
+                        throw new Error(`Navigation continued interrupting verification for "${requirement}" beyond retry limit (${waitRetryLimit}).`);
+                    }
+                    continue;
+                }
+                throw error;
+            }
+            const llmCallDuration = Date.now() - llmCallStart;
+            logDebug('LLM call completed', { durationMs: llmCallDuration, requirement });
+            if (aiResult.requestSomRefresh) {
+                logDebug('LLM requested SoM refresh during verification; retrying', {
+                    requirement,
+                    reason: aiResult.somRefreshReason,
+                    waitCount,
+                    waitRetryLimit,
+                });
+                waitCount = Math.min(waitCount + 1, waitRetryLimit);
+                continue;
+            }
+            const { verificationSuccess, confidence, verificationReason } = extractVerification(aiResult);
+            logDebug('ai.verify result from LLM', { verificationSuccess, confidence, verificationReason });
+            if (aiResult.stepCompleted || verificationSuccess) {
+                logDebug('LLM indicated verification already satisfied', { requirement, verificationSuccess });
+                const response = { verificationSuccess, confidence, verificationReason };
+                logDebug('ai.verify completed', response);
+                return response;
+            }
+            const threshold = Math.max(0, options?.confidence_threshold ?? DEFAULT_CONFIDENCE_THRESHOLD);
+            const expectFn = options?.expect ?? resolveExpect(context);
+            if (!expectFn) {
+                throw new Error('verify() requires Playwright expect. Pass the Playwright test object or provide expect explicitly.');
+            }
+            if (!verificationSuccess && verificationReason) {
+                logDebug('ai.verify reported failure reason', { verificationReason });
+            }
+            logDebug('ai.verify asserting', { threshold });
+            expectFn(confidence, `AI verification confidence ${confidence} is below threshold ${threshold}`).toBeGreaterThanOrEqual(threshold);
+            expectFn(verificationSuccess, `AI verification failed for requirement: ${requirement}${verificationReason ? ` - ${verificationReason}` : ''}`).toBe(true);
             const response = { verificationSuccess, confidence, verificationReason };
             logDebug('ai.verify completed', response);
             return response;
         }
-        const threshold = Math.max(0, options?.confidence_threshold ?? DEFAULT_CONFIDENCE_THRESHOLD);
-        const expectFn = options?.expect ?? resolveExpect(context);
-        if (!expectFn) {
-            throw new Error('verify() requires Playwright expect. Pass the Playwright test object or provide expect explicitly.');
-        }
-        if (!verificationSuccess && verificationReason) {
-            logDebug('ai.verify reported failure reason', { verificationReason });
-        }
-        logDebug('ai.verify asserting', { threshold });
-        expectFn(confidence, `AI verification confidence ${confidence} is below threshold ${threshold}`).toBeGreaterThanOrEqual(threshold);
-        expectFn(verificationSuccess, `AI verification failed for requirement: ${requirement}${verificationReason ? ` - ${verificationReason}` : ''}`).toBe(true);
-        const response = { verificationSuccess, confidence, verificationReason };
-        logDebug('ai.verify completed', response);
-        return response;
+    }
+    finally {
+        // Restore timeouts to baseline after ai.verify completes
+        restoreTestTimeout(context, 'ai.verify');
     }
 }
 async function extract(requirement, context, options) {
