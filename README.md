@@ -78,7 +78,7 @@ const orderIds = await ai.extract('List the order IDs from the table', {
 `ai-wright` chooses credentials in priority order:
 
 1. **OpenAI API key**
-   - Set `OPENAI_API_KEY` env var. (and optionally `OPENAI_MODEL`, defaults to `gpt-5-mini`).
+   - Set `OPENAI_API_KEY` env var. (and optionally `OPENAI_MODEL`, defaults to `gpt-4o-mini`).
 2. **TestChimp API keys**
    - Set `TESTCHIMP_API_KEY` + `TESTCHIMP_PROJECT_ID`, _or_ `TESTCHIMP_USER_AUTH_KEY` + `TESTCHIMP_USER_MAIL`.
    - Benefit: reuse your existing TestChimp account, letting their backend proxy the LLM and cover token costs.
@@ -113,12 +113,12 @@ Environment variables:
 | Variable | Description | Default |
 | --- | --- | --- |
 | `AI_PLAYWRIGHT_DEBUG` | Enable verbose logging (`1`, `true`, `on`, `yes`). | off |
-| `AI_PLAYWRIGHT_TEST_TIMEOUT_MS` | Extend Playwright test timeouts automatically; `0` disables extension. | `180000` |
+| `AI_PLAYWRIGHT_TEST_TIMEOUT_MS` | Extend Playwright test timeouts automatically; `0` disables extension. | `120000` |
 | `AI_PLAYWRIGHT_MAX_WAIT_RETRIES` | How many times the LLM may request additional waits. | `2` |
 | `LLM_CALL_TIMEOUT` | Max duration (ms) for each LLM request. | `120000` |
-| `COMMAND_EXEC_TIMEOUT` | Timeout (ms) for individual DOM actions. | `5000` |
-| `NAVIGATION_COMMAND_TIMEOUT` | Timeout (ms) for navigation actions. | `15000` |
-| `OPENAI_MODEL` | Override the OpenAI model (ignored when using TestChimp). | `gpt-5-mini` |
+| `COMMAND_EXEC_TIMEOUT` | Timeout (ms) for individual DOM actions. | `30000` |
+| `NAVIGATION_COMMAND_TIMEOUT` | Timeout (ms) for navigation actions. | `30000` |
+| `OPENAI_MODEL` | Override the OpenAI model (ignored when using TestChimp). | `gpt-4o-mini` |
 | `GEMINI_API_KEY` | Google Gemini API key used by the Gemini provider. | — |
 | `GEMINI_MODEL` | Override the Gemini model. | `gemini-1.5-flash` |
 | `CLAUDE_API_KEY` | Anthropic Claude API key used by the Claude provider. | — |
