@@ -80,7 +80,7 @@ const orderIds = await ai.extract('List the order IDs from the table', {
 1. **OpenAI API key**
    - Set `OPENAI_API_KEY` env var. (and optionally `OPENAI_MODEL`, defaults to `gpt-5-mini`).
 2. **TestChimp API keys**
-   - Set `TESTCHIMP_API_KEY` + `TESTCHIMP_PROJECT_ID`, _or_ `TESTCHIMP_USER_AUTH_KEY` + `TESTCHIMP_USER_MAIL`.
+   - Set `TESTCHIMP_API_KEY` (optional `TESTCHIMP_PROJECT_ID` for legacy clients), _or_ `TESTCHIMP_USER_AUTH_KEY` + `TESTCHIMP_USER_MAIL`.
    - Benefit: reuse your existing TestChimp account, letting their backend proxy the LLM and cover token costs.
 3. **Google Gemini API key**
    - Set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`, defaults to `gemini-1.5-flash`).

@@ -9,20 +9,22 @@ export function createTestchimpKeyBasedProvider(): LLMProvider {
     name: 'testchimp-key',
 
     canAuthenticate(): boolean {
-      return Boolean(apiKey && projectId);
+      return Boolean(apiKey);
     },
 
     async callLLM(request: LLMRequest, options: LLMCallOptions): Promise<string> {
-      if (!apiKey || !projectId) {
+      if (!apiKey) {
         throw new Error(
-          'TestChimp key-based provider cannot authenticate because TESTCHIMP_API_KEY or TESTCHIMP_PROJECT_ID is missing.',
+          'TestChimp key-based provider cannot authenticate because TESTCHIMP_API_KEY is missing.',
         );
       }
 
-      const headers = {
+      const headers: Record<string, string> = {
         'TestChimp-Api-Key': apiKey,
-        'project-id': projectId,
       };
+      if (projectId) {
+        headers['project-id'] = projectId;
+      }
 
       return performTestchimpRequest(headers, request, options.timeoutMs);
     },

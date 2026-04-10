@@ -8,16 +8,18 @@ function createTestchimpKeyBasedProvider() {
     return {
         name: 'testchimp-key',
         canAuthenticate() {
-            return Boolean(apiKey && projectId);
+            return Boolean(apiKey);
         },
         async callLLM(request, options) {
-            if (!apiKey || !projectId) {
-                throw new Error('TestChimp key-based provider cannot authenticate because TESTCHIMP_API_KEY or TESTCHIMP_PROJECT_ID is missing.');
+            if (!apiKey) {
+                throw new Error('TestChimp key-based provider cannot authenticate because TESTCHIMP_API_KEY is missing.');
             }
             const headers = {
                 'TestChimp-Api-Key': apiKey,
-                'project-id': projectId,
             };
+            if (projectId) {
+                headers['project-id'] = projectId;
+            }
             return (0, testchimp_common_1.performTestchimpRequest)(headers, request, options.timeoutMs);
         },
     };

@@ -7,7 +7,7 @@ The modules in this folder implement the pluggable LLM provider architecture use
 The library ships with the following providers out of the box (checked in this order):
 
 - `openai` (`OPENAI_API_KEY`, optional `OPENAI_MODEL`)
-- `testchimp-key` (`TESTCHIMP_API_KEY` + `TESTCHIMP_PROJECT_ID`)
+- `testchimp-key` (`TESTCHIMP_API_KEY`; optional `TESTCHIMP_PROJECT_ID`)
 - `testchimp-pat` (`TESTCHIMP_USER_AUTH_KEY` + `TESTCHIMP_USER_MAIL`)
 - `gemini` (`GEMINI_API_KEY`, optional `GEMINI_MODEL`)
 - `claude` (`CLAUDE_API_KEY`, optional `CLAUDE_MODEL`)
