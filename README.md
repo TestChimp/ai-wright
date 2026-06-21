@@ -155,6 +155,67 @@ Start by installing the package, set either TestChimp or OpenAI credentials, and
 
 AI where it helps, plain Playwright everywhere else.
 
+## How this helps in real testing scenarios
+
+`ai-wright` shines where **selectors break** and **UI copy shifts**—chat widgets, canvas dashboards, CAPTCHA-gated flows, multi-step wizards, and AI-assisted surfaces. Use deterministic Playwright for stable paths; drop in `ai.act` / `ai.verify` only on the brittle steps. Pair with [@testchimp/playwright](https://www.npmjs.com/package/@testchimp/playwright) so AI steps report to TestChimp CI and count toward scenario traceability.
+
+Start here: [Introduction to SmartTests](https://docs.testchimp.io/smart-tests/intro) · [TestChimp approach to test automation](https://docs.testchimp.io/qa-autopilot-claude/testchimps-approach-to-test-automation) · [Testing guides hub](https://docs.testchimp.io/guides/intro)
+
+### AI & conversational UX (primary `ai-wright` use cases)
+
+| Scenario | Testing guide |
+|----------|----------------|
+| Chatbots & multi-turn UI | [Conversational UI testing](https://docs.testchimp.io/guides/ai/testing-conversational-ui) |
+| AI agent tool calling | [AI agent workflows](https://docs.testchimp.io/guides/ai/testing-ai-agent-workflows) |
+| RAG / knowledge-base search | [RAG testing](https://docs.testchimp.io/guides/ai/testing-rag-search) |
+| LLM output / JSON schema | [LLM output validation](https://docs.testchimp.io/guides/ai/testing-llm-output-validation) |
+| Streaming token responses | [Streaming AI responses](https://docs.testchimp.io/guides/ai/testing-ai-streaming-responses) |
+| When to use evals vs E2E | [AI testing guides hub](https://docs.testchimp.io/guides/ai/intro) · [Conversational UI](https://docs.testchimp.io/guides/ai/testing-conversational-ui) |
+| AI-powered SaaS products | [AI web apps](https://docs.testchimp.io/guides/verticals/testing-ai-web-apps) |
+
+### Visual & dynamic UI (vision-first `ai.verify` / `ai.act`)
+
+| Scenario | Testing guide |
+|----------|----------------|
+| Canvas, charts, drag handles | [Canvas & visual interactions](https://docs.testchimp.io/guides/ai/testing-canvas-visual-interactions) |
+| Google Maps & geo widgets | [Google Maps testing](https://docs.testchimp.io/guides/integrations/testing-google-maps) |
+| Third-party iframes & embeds | [Third-party embeds](https://docs.testchimp.io/guides/integrations/testing-third-party-embeds) |
+| Data grids & complex tables | [Data grids & tables](https://docs.testchimp.io/guides/patterns/testing-data-grids-tables) |
+| Search with dynamic filters | [Search & filters](https://docs.testchimp.io/guides/patterns/testing-search-filters) |
+| Form validation messages | [Form validation](https://docs.testchimp.io/guides/patterns/testing-form-validation) |
+
+### Auth & flows where UI varies by provider
+
+| Scenario | Testing guide |
+|----------|----------------|
+| CAPTCHA on signup/login | [CAPTCHA-enabled flows](https://docs.testchimp.io/guides/auth/testing-captcha-flows) |
+| OAuth provider consent screens | [OAuth social login](https://docs.testchimp.io/guides/auth/testing-oauth-social-login) |
+| MFA / TOTP flows | [MFA & 2FA](https://docs.testchimp.io/guides/auth/testing-mfa-2fa) |
+| Firebase Auth edge cases | [Firebase authentication](https://docs.testchimp.io/guides/auth/testing-firebase-auth) |
+| Magic links & passwordless | [Magic link testing](https://docs.testchimp.io/guides/auth/testing-magic-link-passwordless) |
+
+### Complex business flows (hybrid Playwright + AI steps)
+
+| Scenario | Testing guide |
+|----------|----------------|
+| HR / applicant pipelines | [HR applications](https://docs.testchimp.io/guides/verticals/testing-hr-applications) |
+| Insurance quote wizards | [Insurance quotes](https://docs.testchimp.io/guides/verticals/testing-insurance-quotes) |
+| Healthcare patient portals | [Healthcare portals](https://docs.testchimp.io/guides/verticals/testing-healthcare-portals) |
+| SaaS onboarding & activation | [SaaS onboarding](https://docs.testchimp.io/guides/verticals/testing-saas-onboarding-flows) |
+| E-commerce checkout | [Checkout flows](https://docs.testchimp.io/guides/verticals/testing-ecommerce-checkout-flows) |
+| Legal e-signatures | [E-signature workflows](https://docs.testchimp.io/guides/verticals/testing-legal-esignatures) |
+| Stripe payments | [Stripe in Playwright](https://docs.testchimp.io/guides/flows/testing-stripe-payments) |
+
+### Close the loop with TestChimp
+
+- Link hybrid tests to markdown plans — [Requirement traceability](https://docs.testchimp.io/test-planning/requirement-traceability)
+- Run in CI with AI step reporting — [SmartTests in CI](https://docs.testchimp.io/smart-tests/run-in-ci-playwright) · [@testchimp/playwright](https://www.npmjs.com/package/@testchimp/playwright)
+- Expand automation from TrueCoverage gaps — [/testchimp evolve](https://docs.testchimp.io/qa-autopilot-claude/evolve) · [TrueCoverage intro](https://docs.testchimp.io/truecoverage/intro)
+- Capture manual paths first — [Chrome extension manual capture](https://docs.testchimp.io/chrome-extension/manual-test-capture)
+- Hybrid vs record-replay — [Record-replay vs TestChimp](https://docs.testchimp.io/comparisons/record-replay-vs-testchimp)
+
+More guides: [Integrations](https://docs.testchimp.io/guides/integrations/intro) · [UI patterns](https://docs.testchimp.io/guides/patterns/intro) · [Industry verticals](https://docs.testchimp.io/guides/verticals/intro) · [Fix flaky E2E](https://docs.testchimp.io/guides/verticals/testing-flaky-e2e-tests-startups)
+
 ## Author
 
 `ai-wright` is an Open source project contributed by [TestChimp](https://testchimp.io) — an AI QA platform that learns your web app through explorations, to provide context-aware AI assistance to QA workflows.
