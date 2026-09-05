@@ -1,1 +1,4 @@
 TestChimp sample file update.
+
+# This is an additional sample comment.
+# It demonstrates that comments can be added to the file.
