@@ -1,0 +1,259 @@
+name: ChimpHands
+on:
+  workflow_dispatch:
+    inputs:
+      session_id:
+        required: true
+        type: string
+      prompt:
+        required: true
+        type: string
+      branch:
+        required: false
+        type: string
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  chimphands:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    env:
+      GITHUB_RUN_ID: ${{ github.run_id }}
+      TESTCHIMP_EXECUTION_SOURCE: CLOUD_AGENT
+      CHIMPHANDS_PR_ONLY: "1"
+    steps:
+      # GITHUB_TOKEN cannot create/update .github/workflows/* (no workflows scope on Actions tokens).
+      # Prefer a short-lived TestChimp GitHub App installation token (App must have Workflows: write).
+      - name: Resolve git token for checkout and push
+        id: git_auth
+        env:
+          TESTCHIMP_API_KEY: ${{ secrets.TESTCHIMP_API_KEY }}
+          TESTCHIMP_BACKEND_URL: ${{ vars.TESTCHIMP_BACKEND_URL || secrets.TESTCHIMP_BACKEND_URL }}
+          FALLBACK_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BACKEND="${TESTCHIMP_BACKEND_URL:-https://featureservice.testchimp.io}"
+          BACKEND="${BACKEND%/}"
+          TOKEN=""
+          if [ -n "${TESTCHIMP_API_KEY:-}" ]; then
+            HTTP_CODE=$(curl -sS -o /tmp/tc_git_token.json -w "%{http_code}" -X POST \
+              "${BACKEND}/api/chimphands/github_write_token" \
+              -H "Content-Type: application/json" \
+              -H "TestChimp-Api-Key: ${TESTCHIMP_API_KEY}" \
+              -d '{}' || echo "000")
+            if [ "$HTTP_CODE" = "200" ] && [ -f /tmp/tc_git_token.json ]; then
+              TOKEN=$(python3 -c 'import json; d=json.load(open("/tmp/tc_git_token.json")); print(d.get("token") or "")' 2>/dev/null || true)
+            fi
+            rm -f /tmp/tc_git_token.json
+          fi
+          if [ -z "${TOKEN:-}" ]; then
+            echo "Using GITHUB_TOKEN fallback (cannot push files under .github/workflows/)."
+            TOKEN="$FALLBACK_TOKEN"
+          else
+            echo "Using TestChimp GitHub App installation token for git."
+          fi
+          echo "::add-mask::$TOKEN"
+          {
+            echo "token<<EOF"
+            echo "$TOKEN"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+          # Persist for later steps (OpenCode / gh pr create / git push). Step-scoped
+          # env on "Configure git" alone does not reach "Run ChimpHands".
+          echo "GH_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+          echo "GITHUB_TOKEN=$TOKEN" >> "$GITHUB_ENV"
+      # Shallow checkout of the session branch only (never fetch-depth: 0 — full history
+      # plus all remote branches exhausts ubuntu-latest disk). Branch names without objects
+      # are written to /tmp/chimphands/remote-branch-names.txt by the follow-up step.
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch || github.ref_name }}
+          fetch-depth: 1
+          token: ${{ steps.git_auth.outputs.token }}
+      - name: Index remote branch names (refs only)
+        env:
+          CHIMPHANDS_INPUT_BRANCH: ${{ inputs.branch }}
+        run: |
+          set -euo pipefail
+          WORK_BRANCH="${CHIMPHANDS_INPUT_BRANCH:-${GITHUB_REF_NAME:-main}}"
+          REMOTE_BRANCH_NAMES="/tmp/chimphands/remote-branch-names.txt"
+          echo "CHIMPHANDS_WORK_BRANCH=${WORK_BRANCH}" >> "${GITHUB_ENV}"
+          echo "CHIMPHANDS_REMOTE_BRANCH_NAMES=${REMOTE_BRANCH_NAMES}" >> "${GITHUB_ENV}"
+          mkdir -p /tmp/chimphands
+          git ls-remote --heads origin 2>/dev/null \
+            | awk '{print $2}' | sed 's@^refs/heads/@@' | sort -u \
+            > "${REMOTE_BRANCH_NAMES}" || true
+          echo "ChimpHands work branch: ${WORK_BRANCH}"
+          echo "Remote branch names: ${REMOTE_BRANCH_NAMES}"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Configure git and GitHub CLI for PR workflow
+        env:
+          GH_TOKEN: ${{ steps.git_auth.outputs.token }}
+        run: |
+          git config user.name "ChimpHands Bot"
+          git config user.email "chimphands[bot]@users.noreply.github.com"
+          type -p gh >/dev/null 2>&1 || (type -p apt-get >/dev/null 2>&1 && sudo apt-get update -qq && sudo apt-get install -y gh)
+          gh auth status || gh auth setup-git
+      - name: Link GitHub Actions run to TestChimp session
+        env:
+          TESTCHIMP_API_KEY: ${{ secrets.TESTCHIMP_API_KEY }}
+          TESTCHIMP_BACKEND_URL: ${{ vars.TESTCHIMP_BACKEND_URL || secrets.TESTCHIMP_BACKEND_URL }}
+          SESSION_ID: ${{ inputs.session_id }}
+        run: |
+          BACKEND="${TESTCHIMP_BACKEND_URL:-https://featureservice.testchimp.io}"
+          BACKEND="${BACKEND%/}"
+          if [ -z "$TESTCHIMP_API_KEY" ] || [ -z "$SESSION_ID" ] || [ -z "$GITHUB_RUN_ID" ]; then
+            echo "Skipping run link (missing API key, session id, or run id)."
+            exit 0
+          fi
+          python3 - <<'PY'
+          import json, os, urllib.request
+          # Empty Actions var/secret still sets the env key; treat blank like unset → prod.
+          backend = (os.environ.get("TESTCHIMP_BACKEND_URL") or "https://featureservice.testchimp.io").strip().rstrip("/")
+          body = {
+              "sessionId": os.environ["SESSION_ID"],
+              "githubRunId": os.environ["GITHUB_RUN_ID"],
+          }
+          req = urllib.request.Request(
+              f"{backend}/api/chimphands/post_agent_event",
+              data=json.dumps(body).encode("utf-8"),
+              headers={
+                  "Content-Type": "application/json",
+                  "TestChimp-Api-Key": os.environ["TESTCHIMP_API_KEY"],
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  print(resp.read().decode("utf-8", errors="replace"))
+          except Exception as e:
+              print(f"Failed to link GitHub Actions run: {e}")
+          PY
+      - name: Install OpenCode + TestChimp CLI
+        run: |
+          # OpenCode package is opencode-ai (not "opencode"). Use @latest so each run picks up current CLI.
+          npm install -g opencode-ai@latest
+          npm install -g @testchimp/cli@latest
+      - name: Clone TestChimp skill
+        run: |
+          mkdir -p .agents/skills
+          git clone --depth 1 https://github.com/testchimphq/testchimp-skills.git .agents/skills/testchimp
+      - name: Start ChimpHands Runtime (OpenCode server)
+        run: |
+          set -euo pipefail
+          # Warm-up only. CLI restarts `opencode serve` after writing opencode.json
+          # (provider + default_agent). Attach mode must not rely on a pre-config server.
+          # Keep runner logs out of the git worktree (tmpdir) so commit status stays clean.
+          nohup opencode serve --port 4096 --hostname 127.0.0.1 > /tmp/chimphands-opencode-server.log 2>&1 &
+          echo $! > /tmp/opencode-server.pid
+          for i in $(seq 1 60); do
+            code=$(curl -sS -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:4096/global/health" || true)
+            if echo "$code" | grep -Eq '^(200|401)$'; then
+              echo "OpenCode server ready on :4096 (http $code)"
+              exit 0
+            fi
+            code2=$(curl -sS -m 2 -o /dev/null -w "%{http_code}" "http://127.0.0.1:4096/" || true)
+            if echo "$code2" | grep -Eq '^(200|401|404)$'; then
+              echo "OpenCode server ready on :4096 (http $code2)"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "OpenCode server failed to become ready:"
+          tail -n 80 /tmp/chimphands-opencode-server.log || true
+          exit 1
+      - name: Run ChimpHands
+        id: chimphands_run
+        env:
+          TESTCHIMP_API_KEY: ${{ secrets.TESTCHIMP_API_KEY }}
+          # Must match the TestChimp env where the session was created (staging vs prod).
+          # Prefer non-secret Actions variable; fall back to secret; CLI defaults to prod if unset.
+          TESTCHIMP_BACKEND_URL: ${{ vars.TESTCHIMP_BACKEND_URL || secrets.TESTCHIMP_BACKEND_URL }}
+          SESSION_ID: ${{ inputs.session_id }}
+          PROMPT: ${{ inputs.prompt }}
+          CHIMPHANDS_WORK_BRANCH: ${{ inputs.branch || github.ref_name }}
+          OPENCODE_ATTACH_URL: http://127.0.0.1:4096
+          # Explicitly pass resolved token (also set via GITHUB_ENV from git_auth).
+          GH_TOKEN: ${{ steps.git_auth.outputs.token }}
+          GITHUB_TOKEN: ${{ steps.git_auth.outputs.token }}
+        run: |
+          set -o pipefail
+          BACKEND="${TESTCHIMP_BACKEND_URL:-https://featureservice.testchimp.io}"
+          echo "ChimpHands backend: ${BACKEND%/}"
+          echo "ChimpHands session: ${SESSION_ID}"
+          if [ -z "${GH_TOKEN:-}" ] && [ -z "${GITHUB_TOKEN:-}" ]; then
+            echo "WARNING: GH_TOKEN/GITHUB_TOKEN unset — gh pr create and protected pushes will fail."
+          fi
+          # Prefer serve (runtime register + attach); fall back to run --attach for older CLI.
+          if testchimp chimphands serve --help >/dev/null 2>&1; then
+            testchimp chimphands serve --attach http://127.0.0.1:4096 2>&1 | tee /tmp/chimphands-run.log
+          else
+            testchimp chimphands run --attach http://127.0.0.1:4096 2>&1 | tee /tmp/chimphands-run.log
+          fi
+          exit ${PIPESTATUS[0]}
+      - name: Dump OpenCode logs on failure
+        if: failure()
+        run: |
+          echo "=== /tmp/chimphands-opencode-server.log (tail) ==="
+          tail -n 120 /tmp/chimphands-opencode-server.log || true
+          echo "=== /tmp/chimphands-run.log (tail) ==="
+          tail -n 120 /tmp/chimphands-run.log || true
+          echo "=== ~/.local/share/opencode/log (tail) ==="
+          ls -la "${HOME}/.local/share/opencode/log" 2>/dev/null || true
+          latest="$(ls -1t "${HOME}/.local/share/opencode/log"/*.log 2>/dev/null | head -1 || true)"
+          if [ -n "${latest:-}" ]; then
+            echo "--- ${latest} ---"
+            tail -n 120 "$latest" || true
+          fi
+      - name: Report workflow failure to TestChimp
+        if: failure() && steps.chimphands_run.outcome == 'failure'
+        env:
+          TESTCHIMP_API_KEY: ${{ secrets.TESTCHIMP_API_KEY }}
+          TESTCHIMP_BACKEND_URL: ${{ vars.TESTCHIMP_BACKEND_URL || secrets.TESTCHIMP_BACKEND_URL }}
+          SESSION_ID: ${{ inputs.session_id }}
+          CHIMPHANDS_RUN_OUTCOME: ${{ steps.chimphands_run.outcome }}
+        run: |
+          BACKEND="${TESTCHIMP_BACKEND_URL:-https://featureservice.testchimp.io}"
+          BACKEND="${BACKEND%/}"
+          if [ "$CHIMPHANDS_RUN_OUTCOME" = "failure" ] && [ -f /tmp/chimphands-run.log ]; then
+            ERR="$(tail -n 30 /tmp/chimphands-run.log 2>/dev/null | head -c 3800)"
+          else
+            ERR="ChimpHands workflow failed before or during setup. Check the GitHub Actions job logs for details."
+          fi
+          if [ -z "$ERR" ]; then
+            ERR="ChimpHands workflow failed. Check the GitHub Actions job logs for details."
+          fi
+          if [ -z "$TESTCHIMP_API_KEY" ]; then
+            echo "TESTCHIMP_API_KEY secret is not set — cannot report failure to TestChimp."
+            exit 1
+          fi
+          export ERR
+          python3 - <<'PY'
+          import json, os, sys, urllib.request
+          # Empty Actions var/secret still sets the env key; treat blank like unset → prod.
+          backend = (os.environ.get("TESTCHIMP_BACKEND_URL") or "https://featureservice.testchimp.io").strip().rstrip("/")
+          body = {
+              "sessionId": os.environ["SESSION_ID"],
+              "status": "CHIMPHANDS_SESSION_STATUS_FAILED",
+              "errorMessage": os.environ.get("ERR", "ChimpHands workflow failed."),
+              "githubRunId": os.environ.get("GITHUB_RUN_ID", ""),
+          }
+          req = urllib.request.Request(
+              f"{backend}/api/chimphands/complete_session",
+              data=json.dumps(body).encode("utf-8"),
+              headers={
+                  "Content-Type": "application/json",
+                  "TestChimp-Api-Key": os.environ["TESTCHIMP_API_KEY"],
+              },
+              method="POST",
+          )
+          try:
+              with urllib.request.urlopen(req, timeout=30) as resp:
+                  print(resp.read().decode("utf-8", errors="replace"))
+          except Exception as e:
+              print(f"Failed to report ChimpHands failure: {e}")
+              sys.exit(1)
+          PY
