@@ -2,7 +2,7 @@ import Anthropic from '@anthropic-ai/sdk';
 import { LLMCallOptions, LLMProvider, LLMRequest } from './llm-provider';
 import { resolveVisionInput } from './vision-utils';
 
-const DEFAULT_CLAUDE_MODEL = 'claude-3-sonnet-20240229';
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
 const DEFAULT_CLAUDE_MAX_TOKENS = 1024;
 
 type ClaudeImageMediaType = 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp';

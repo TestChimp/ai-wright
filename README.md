@@ -1,6 +1,6 @@
 # ai-wright
 
-AI steps (`ai.act`, `ai.verify`) in your Playwright tests — open source, vision-enabled, with no vendor lock-in.
+AI steps (`ai.act`, `ai.verify`) in your Playwright tests - open source, vision-enabled, with no vendor lock-in.
 
 ## Introduction
 
@@ -11,11 +11,11 @@ AI steps (`ai.act`, `ai.verify`) in your Playwright tests — open source, visio
 Unlike other solutions, `ai-wright` relies on *vision intelligence*: screenshots are annotated with Set-of-Marks (SoM) overlays and combined with DOM element maps for disambiguation, so the LLM can navigate complex UIs with far greater accuracy and resilience.
 
 **Why teams adopt `ai-wright`:**
-- **Vendor flexibility & BYOL** – use your own [OpenAI](./src/llm-providers/openai.md), [Gemini](./src/llm-providers/gemini.md), or [Claude](./src/llm-providers/claude.md) keys, or your [TestChimp](https://testchimp.io) license (to avoid separate token usage costs).
-- **Vision-first semantics** – SoM overlays + DOM metadata give the model precise context.
-- **Resilient prompting** – pre-action planning (eg: handling blockers like modals before addressing the actual requirement step), retry guidance, ability to handle coarse-grained steps with multi-step planning.
-- **Open source** – complete transparency and community support.
-- **Pluggable LLM providers** – extend to any LLM provider (eg: a local LLM) by implementing a provider (see [src/llm-providers/README.md](./src/llm-providers/README.md)).
+- **Vendor flexibility & BYOL** - use your own [OpenAI](./src/llm-providers/openai.md), [Gemini](./src/llm-providers/gemini.md), or [Claude](./src/llm-providers/claude.md) keys, or your [TestChimp](https://testchimp.io) license (to avoid separate token usage costs).
+- **Vision-first semantics** - SoM overlays + DOM metadata give the model precise context.
+- **Resilient prompting** - pre-action planning (eg: handling blockers like modals before addressing the actual requirement step), retry guidance, ability to handle coarse-grained steps with multi-step planning.
+- **Open source** - complete transparency and community support.
+- **Pluggable LLM providers** - extend to any LLM provider (eg: a local LLM) by implementing a provider (see [src/llm-providers/README.md](./src/llm-providers/README.md)).
 
 ## Usage Guide
 
@@ -78,14 +78,14 @@ const orderIds = await ai.extract('List the order IDs from the table', {
 `ai-wright` chooses credentials in priority order:
 
 1. **OpenAI API key**
-   - Set `OPENAI_API_KEY` env var. (and optionally `OPENAI_MODEL`, defaults to `gpt-4o-mini`).
+   - Set `OPENAI_API_KEY` env var. (and optionally `OPENAI_MODEL`, defaults to `gpt-5-mini`).
 2. **TestChimp API keys**
    - Set `TESTCHIMP_API_KEY` (optional `TESTCHIMP_PROJECT_ID` for legacy clients), _or_ `TESTCHIMP_USER_AUTH_KEY` + `TESTCHIMP_USER_MAIL`.
    - Benefit: reuse your existing TestChimp account, letting their backend proxy the LLM and cover token costs.
 3. **Google Gemini API key**
-   - Set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`, defaults to `gemini-1.5-flash`).
+   - Set `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`, defaults to `gemini-3.8-flash`).
 4. **Anthropic Claude API key**
-   - Set `CLAUDE_API_KEY` (and optionally `CLAUDE_MODEL`, defaults to `claude-3-sonnet-20240229`).
+   - Set `CLAUDE_API_KEY` (and optionally `CLAUDE_MODEL`, defaults to `claude-sonnet-5-5`).
 
 The selection order is configurable in [`src/llm-providers/config.ts`](./src/llm-providers/config.ts). See the [LLM provider guide](./src/llm-providers/README.md) for instructions on adding new providers.
 
@@ -118,11 +118,11 @@ Environment variables:
 | `LLM_CALL_TIMEOUT` | Max duration (ms) for each LLM request. | `120000` |
 | `COMMAND_EXEC_TIMEOUT` | Timeout (ms) for individual DOM actions. | `30000` |
 | `NAVIGATION_COMMAND_TIMEOUT` | Timeout (ms) for navigation actions. | `30000` |
-| `OPENAI_MODEL` | Override the OpenAI model (ignored when using TestChimp). | `gpt-4o-mini` |
-| `GEMINI_API_KEY` | Google Gemini API key used by the Gemini provider. | — |
-| `GEMINI_MODEL` | Override the Gemini model. | `gemini-1.5-flash` |
-| `CLAUDE_API_KEY` | Anthropic Claude API key used by the Claude provider. | — |
-| `CLAUDE_MODEL` | Override the Claude model. | `claude-3-sonnet-20240229` |
+| `OPENAI_MODEL` | Override the OpenAI model (ignored when using TestChimp). | `gpt-5-mini` |
+| `GEMINI_API_KEY` | Google Gemini API key used by the Gemini provider. | - |
+| `GEMINI_MODEL` | Override the Gemini model. | `gemini-3.8-flash` |
+| `CLAUDE_API_KEY` | Anthropic Claude API key used by the Claude provider. | - |
+| `CLAUDE_MODEL` | Override the Claude model. | `claude-sonnet-5-5` |
 | `CLAUDE_MAX_TOKENS` | Override the Claude response token limit. | `1024` |
 
 Optional context/options:
@@ -157,7 +157,7 @@ AI where it helps, plain Playwright everywhere else.
 
 ## How this helps in real testing scenarios
 
-`ai-wright` shines where **selectors break** and **UI copy shifts**—chat widgets, canvas dashboards, CAPTCHA-gated flows, multi-step wizards, and AI-assisted surfaces. Use deterministic Playwright for stable paths; drop in `ai.act` / `ai.verify` only on the brittle steps. Pair with [@testchimp/playwright](https://www.npmjs.com/package/@testchimp/playwright) so AI steps report to TestChimp CI and count toward scenario traceability.
+`ai-wright` shines where **selectors break** and **UI copy shifts** - chat widgets, canvas dashboards, CAPTCHA-gated flows, multi-step wizards, and AI-assisted surfaces. Use deterministic Playwright for stable paths; drop in `ai.act` / `ai.verify` only on the brittle steps. Pair with [@testchimp/playwright](https://www.npmjs.com/package/@testchimp/playwright) so AI steps report to TestChimp CI and count toward scenario traceability.
 
 Start here: [Introduction to SmartTests](https://docs.testchimp.io/smart-tests/intro) · [TestChimp approach to test automation](https://docs.testchimp.io/qa-autopilot-claude/testchimps-approach-to-test-automation) · [Testing guides hub](https://docs.testchimp.io/guides/intro)
 
@@ -208,18 +208,18 @@ Start here: [Introduction to SmartTests](https://docs.testchimp.io/smart-tests/i
 
 ### Close the loop with TestChimp
 
-- Link hybrid tests to markdown plans — [Requirement traceability](https://docs.testchimp.io/test-planning/requirement-traceability)
-- Run in CI with AI step reporting — [SmartTests in CI](https://docs.testchimp.io/smart-tests/run-in-ci-playwright) · [@testchimp/playwright](https://www.npmjs.com/package/@testchimp/playwright)
-- Expand automation from TrueCoverage gaps — [/testchimp evolve](https://docs.testchimp.io/qa-autopilot-claude/evolve) · [TrueCoverage intro](https://docs.testchimp.io/truecoverage/intro)
-- Capture manual paths first — [Chrome extension manual capture](https://docs.testchimp.io/chrome-extension/manual-test-capture)
-- Hybrid vs record-replay — [Record-replay vs TestChimp](https://docs.testchimp.io/comparisons/record-replay-vs-testchimp)
+- Link hybrid tests to markdown plans - [Requirement traceability](https://docs.testchimp.io/test-planning/requirement-traceability)
+- Run in CI with AI step reporting - [SmartTests in CI](https://docs.testchimp.io/smart-tests/run-in-ci-playwright) · [@testchimp/playwright](https://www.npmjs.com/package/@testchimp/playwright)
+- Expand automation from TrueCoverage gaps - [/testchimp evolve](https://docs.testchimp.io/qa-autopilot-claude/evolve) · [TrueCoverage intro](https://docs.testchimp.io/truecoverage/intro)
+- Capture manual paths first - [Chrome extension manual capture](https://docs.testchimp.io/chrome-extension/manual-test-capture)
+- Hybrid vs record-replay - [Record-replay vs TestChimp](https://docs.testchimp.io/comparisons/record-replay-vs-testchimp)
 
 More guides: [Integrations](https://docs.testchimp.io/guides/integrations/intro) · [UI patterns](https://docs.testchimp.io/guides/patterns/intro) · [Industry verticals](https://docs.testchimp.io/guides/verticals/intro) · [Fix flaky E2E](https://docs.testchimp.io/guides/verticals/testing-flaky-e2e-tests-startups)
 
 ## Author
 
-`ai-wright` is an Open source project contributed by [TestChimp](https://testchimp.io) — an AI QA platform that learns your web app through explorations, to provide context-aware AI assistance to QA workflows.
+`ai-wright` is an Open source project contributed by [TestChimp](https://testchimp.io) - an AI QA platform that learns your web app through explorations, to provide context-aware AI assistance to QA workflows.
 
 ## License
 
-Distributed under the GNU Affero General Public License v3.0. See the [LICENSE](./LICENSE) file for full terms.
+Distributed under the MIT License. See the [LICENSE](./LICENSE) file for full terms.

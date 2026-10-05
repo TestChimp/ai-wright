@@ -5,7 +5,7 @@ import { LLMCallOptions, LLMProvider, LLMRequest } from './llm-provider';
 import { resolveVisionInput } from './vision-utils';
 import { withTimeout } from './timeout-utils';
 
-const DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 
 export function createGeminiProvider(): LLMProvider {
   const apiKey = process.env.GEMINI_API_KEY?.trim();
