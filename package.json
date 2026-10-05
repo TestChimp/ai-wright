@@ -1,7 +1,7 @@
 {
   "name": "ai-wright",
   "version": "0.0.12",
-  "description": "AI-steps in your Playwright scripts",
+  "description": "Vision-enabled AI steps for Playwright tests with bring-your-own-license LLM support",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [
@@ -11,6 +11,24 @@
     "build": "tsc",
     "clean": "rm -rf dist"
   },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/TestChimp/ai-wright.git"
+  },
+  "homepage": "https://github.com/TestChimp/ai-wright#readme",
+  "bugs": {
+    "url": "https://github.com/TestChimp/ai-wright/issues"
+  },
+  "keywords": [
+    "playwright",
+    "ai",
+    "testing",
+    "e2e",
+    "llm",
+    "set-of-marks",
+    "test-automation"
+  ],
+  "license": "MIT",
   "dependencies": {
     "@anthropic-ai/sdk": "^0.24.0",
     "@google/generative-ai": "^0.11.0",

@@ -4,7 +4,7 @@ exports.createGeminiProvider = createGeminiProvider;
 const generative_ai_1 = require("@google/generative-ai");
 const vision_utils_1 = require("./vision-utils");
 const timeout_utils_1 = require("./timeout-utils");
-const DEFAULT_GEMINI_MODEL = 'gemini-1.5-flash';
+const DEFAULT_GEMINI_MODEL = 'gemini-3.8-flash';
 function createGeminiProvider() {
     const apiKey = process.env.GEMINI_API_KEY?.trim();
     const modelId = process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;

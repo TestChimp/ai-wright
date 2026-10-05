@@ -6,7 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.createClaudeProvider = createClaudeProvider;
 const sdk_1 = __importDefault(require("@anthropic-ai/sdk"));
 const vision_utils_1 = require("./vision-utils");
-const DEFAULT_CLAUDE_MODEL = 'claude-3-sonnet-20240229';
+const DEFAULT_CLAUDE_MODEL = 'claude-sonnet-5-5';
 const DEFAULT_CLAUDE_MAX_TOKENS = 1024;
 function resolveClaudeMaxTokens() {
     const raw = process.env.CLAUDE_MAX_TOKENS?.trim();

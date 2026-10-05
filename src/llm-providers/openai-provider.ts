@@ -1,7 +1,7 @@
 import OpenAI from 'openai';
 import { LLMCallOptions, LLMProvider, LLMRequest } from './llm-provider';
 
-const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
+const DEFAULT_OPENAI_MODEL = 'gpt-5-mini';
 
 type UserMessagePart =
   | { type: 'text'; text: string }
